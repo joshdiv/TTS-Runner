@@ -1,0 +1,28 @@
+{
+  "_note": "Edit these if MiniMax changes its page. Use the app's 'Diagnose page' button to see what is on the page. Each list is tried in order.",
+  "textInput": [
+    "textarea",
+    "[contenteditable='true']",
+    "div[role='textbox']"
+  ],
+  "generate": [
+    "button:has-text('Generate')",
+    "button:has-text('Create')",
+    "[role='button']:has-text('Generate')"
+  ],
+  "busyText": [
+    "generating",
+    "loading",
+    "processing",
+    "cancel",
+    "stop"
+  ],
+  "download": [
+    "button:has-text('Download')",
+    "[role='button']:has-text('Download')",
+    "[aria-label*='ownload' i]",
+    "[title*='ownload' i]",
+    "[class*='download' i]"
+  ],
+  "preferredFormat": "WAV"
+}

@@ -1,0 +1,12 @@
+node_modules/
+dist/
+out/
+release/
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.mp3
+*.wav
+*.tts-project.json
+.env
