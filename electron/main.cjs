@@ -1,8 +1,9 @@
-const { app, BrowserWindow, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
 const { spawn } = require("child_process");
 const readline = require("readline");
 const path = require("path");
 const fs = require("fs");
+const { buildMenu } = require("./menu.cjs");
 
 let win = null;
 let py = null;
@@ -87,20 +88,48 @@ ipcMain.handle("pick-dir", async () => {
   return r.canceled ? null : r.filePaths[0];
 });
 
+// Project files: a Save dialog that always ends in .ttsrunner (the content is JSON)
+ipcMain.handle("pick-project-save", async (_e, name) => {
+  const base = String(name || "Untitled project").replace(/[<>:"/\\|?*\x00-\x1f]/g, "_");
+  const r = await dialog.showSaveDialog(win, {
+    title: "Save project as",
+    defaultPath: path.join(app.getPath("documents"), `${base}.ttsrunner`),
+    filters: [{ name: "TTS Runner project", extensions: ["ttsrunner"] }],
+  });
+  if (r.canceled || !r.filePath) return null;
+  return /\.ttsrunner$/i.test(r.filePath) ? r.filePath : r.filePath + ".ttsrunner";
+});
+
+// File > Open Recent is rebuilt whenever the app reports a new recent list
+let recentList = [];
+ipcMain.on("recent", (_e, list) => {
+  recentList = Array.isArray(list) ? list.slice(0, 12) : [];
+  Menu.setApplicationMenu(buildMenu(() => win, recentList));
+});
+
 // ---------- Window ----------
 function createWindow() {
+  const iconPath = path.join(__dirname, "icon.ico");   // put your icon at electron/icon.ico
+
   win = new BrowserWindow({
     width: 1280,
     height: 820,
     minWidth: 980,
-    backgroundColor: "#e8ecf0",
+    title: "TTS Runner",
+    ...(fs.existsSync(iconPath) ? { icon: iconPath } : {}),
+    backgroundColor: "#0a0a0b",
     webPreferences: { preload: path.join(__dirname, "preload.cjs"), contextIsolation: true },
   });
-  win.setMenuBarVisibility(false);
+
   if (app.isPackaged) win.loadFile(path.join(__dirname, "..", "dist", "index.html"));
   else if (process.argv.includes("--built")) win.loadFile(path.join(__dirname, "..", "dist", "index.html"));
   else win.loadURL("http://localhost:5173");
 }
 
-app.whenReady().then(() => { startPython(); createWindow(); });
+app.whenReady().then(() => {
+  startPython();
+  Menu.setApplicationMenu(buildMenu(() => win, recentList));
+  createWindow();
+});
+
 app.on("window-all-closed", () => { if (py) py.kill(); app.quit(); });

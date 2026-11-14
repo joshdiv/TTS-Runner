@@ -14,9 +14,13 @@ import base64
 import json
 import re
 import shutil
+import subprocess
 import sys
 import time
 import traceback
+import os
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 # stdout is reserved for the protocol; stray prints go to stderr.
@@ -438,7 +442,9 @@ def list_done(p):
     folder = Path(p["outputDir"])
     if not folder.is_dir():
         return {"done": []}
-    ids = {f.stem for f in folder.iterdir() if f.suffix.lower() in AUDIO_EXTS}
+    files = folder.rglob("*") if p.get("recursive") else folder.iterdir()
+    ids = {f.stem for f in files
+           if f.is_file() and f.suffix.lower() in AUDIO_EXTS and "__" not in f.stem}
     return {"done": sorted(ids)}
 
 
@@ -447,14 +453,15 @@ MAX_PREVIEW_BYTES = 40 * 1024 * 1024
 
 
 def read_audio(p):
-    """Return a saved clip (base64) so the app can play it. Looks for <id>.<audio ext> in each folder given."""
+    """Return a saved clip (base64) so the app can play it."""
     sid = safe_name(p["id"])
     for d in p.get("dirs") or []:
         folder = Path(d)
         if not folder.is_dir():
             continue
-        for f in sorted(folder.iterdir()):
-            if f.stem == sid and f.suffix.lower() in AUDIO_EXTS:
+        files = folder.rglob("*") if p.get("recursive") else folder.iterdir()
+        for f in sorted(files):
+            if f.is_file() and f.stem == sid and f.suffix.lower() in AUDIO_EXTS:
                 size = f.stat().st_size
                 if size > MAX_PREVIEW_BYTES:
                     raise RuntimeError(f"{f.name} is too large to preview ({size // 1048576} MB)")
@@ -462,6 +469,63 @@ def read_audio(p):
                         "mime": MIME.get(f.suffix.lower(), "audio/mpeg"),
                         "data": base64.b64encode(f.read_bytes()).decode("ascii")}
     return {"found": False}
+
+def list_takes(p):
+    """{ 'ADD-W01-GRP-RXN-001': ['BIL', 'REG'], ... } for the files in the GRP folder."""
+    folder = Path(p["dir"])
+    takes = {}
+    if folder.is_dir():
+        for f in folder.iterdir():
+            if f.is_file() and f.suffix.lower() in AUDIO_EXTS and "__" in f.stem:
+                sid, _, ch = f.stem.rpartition("__")
+                takes.setdefault(sid, []).append(ch)
+    return {"takes": takes}
+
+
+def mix(p):
+    ff = shutil.which("ffmpeg")
+    if not ff:
+        raise RuntimeError("ffmpeg not found on PATH. Install it, then restart the app.")
+    tdir = Path(p["takesDir"])
+    out = Path(p["outputDir"])
+    out.mkdir(parents=True, exist_ok=True)
+    sid = safe_name(p["id"])
+    order = p.get("order") or []
+
+    def rank(f):
+        ch = f.stem.rpartition("__")[2]
+        return (order.index(ch) if ch in order else len(order), ch)
+
+    takes = sorted((f for f in tdir.glob(sid + "__*.*") if f.suffix.lower() in AUDIO_EXTS), key=rank)
+    if not takes:
+        raise RuntimeError("No voices saved for this line yet.")
+    n = len(takes)
+    offset = int(p.get("offsetMs", 40))           # small stagger so it sounds like a crowd
+    vol = round(1 / (n ** 0.5), 3)
+    parts = [f"[{i}:a]adelay={i * offset}|{i * offset},volume={vol}[a{i}]" for i in range(n)]
+    graph = (";".join(parts) + ";" + "".join(f"[a{i}]" for i in range(n))
+             + f"amix=inputs={n}:normalize=0:duration=longest,alimiter=limit=0.95[out]")
+    cmd = [ff, "-y", "-loglevel", "error"]
+    for t in takes:
+        cmd += ["-i", str(t)]
+    tmp = out / f"{sid}.mixing.mp3"
+    cmd += ["-filter_complex", graph, "-map", "[out]", "-c:a", "libmp3lame", "-q:a", "2", str(tmp)]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode:
+        raise RuntimeError("ffmpeg failed: " + r.stderr.strip()[-300:])
+    for old in out.glob(sid + ".*"):
+        if old != tmp and old.suffix.lower() in AUDIO_EXTS:
+            old.unlink()
+    dest = out / f"{sid}.mp3"
+    tmp.replace(dest)
+    if p.get("deleteTakes"):
+        for t in takes:
+            t.unlink()
+        try:
+            tdir.rmdir()                          # only succeeds if the folder is now empty
+        except OSError:
+            pass
+    return {"file": str(dest), "name": dest.name, "takes": n}
 
 
 def write_text(p):
@@ -482,6 +546,80 @@ def read_text(p):
         return {"found": False}
     return {"found": True, "text": path.read_text(encoding="utf-8")}
 
+_LAST = {"audio": None, "ext": ".mp3"}     # the clip waiting to be kept
+
+
+def _eleven_key(p):
+    key = (p.get("apiKey") or os.environ.get("ELEVENLABS_API_KEY") or "").strip()
+    if not key:
+        raise RuntimeError("No ElevenLabs API key. Add it in Settings → ElevenLabs API.")
+    return key
+
+
+def _eleven(url, key, body=None):
+    req = urllib.request.Request(
+        url, data=json.dumps(body).encode("utf-8") if body is not None else None,
+        headers={"xi-api-key": key, "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return r.read()
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"ElevenLabs HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:300]}")
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Could not reach ElevenLabs: {e.reason}")
+
+
+def eleven_voices(p):
+    """Every voice on the account, cloned ones first."""
+    data = json.loads(_eleven("https://api.elevenlabs.io/v1/voices", _eleven_key(p)).decode("utf-8"))
+    rank = {"cloned": 0, "professional": 1, "generated": 2}
+    voices = [{"id": v["voice_id"], "name": v.get("name", ""), "category": v.get("category", "")}
+              for v in data.get("voices", [])]
+    voices.sort(key=lambda v: (rank.get(v["category"], 3), v["name"].lower()))
+    return {"voices": voices}
+
+
+def eleven_generate(p):
+    key = _eleven_key(p)
+    text = (p.get("text") or "").strip()
+    if not text:
+        raise RuntimeError("This line has no dialogue text.")
+    voice_id = p.get("voiceId")
+    if not voice_id:
+        raise RuntimeError("No voice chosen for this character.")
+    model = p.get("model") or "eleven_v4"
+    if not model.startswith("eleven_"):
+        raise RuntimeError(f"'{model}' is not an ElevenLabs model. Pick one in Settings → ElevenLabs API.")
+    voice_settings = {
+        "stability": float(p.get("stability", 0.5)),
+        "similarity_boost": float(p.get("similarity", 0.75)),
+    }
+    if not re.match(r"eleven_v[34]", model):      # v3/v4: only stability and similarity are sent
+        voice_settings["style"] = float(p.get("style", 0))
+        voice_settings["speed"] = float(p.get("speed", 1))
+    body = {"text": text, "model_id": model, "voice_settings": voice_settings}
+    
+    t0 = time.time()
+    audio = _eleven(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}?output_format=mp3_44100_128", key, body)
+    if len(audio) < 1000:
+        raise RuntimeError("ElevenLabs returned no audio: " + audio.decode("utf-8", "replace")[:200])
+    _LAST["audio"], _LAST["ext"] = audio, ".mp3"
+    return {"seconds": round(time.time() - t0, 1), "mime": "audio/mpeg",
+            "data": base64.b64encode(audio).decode("ascii")}
+
+def api_save(p):
+    if not _LAST["audio"]:
+        raise RuntimeError("Nothing generated yet.")
+    out = Path(p["outputDir"])
+    out.mkdir(parents=True, exist_ok=True)
+    sid = safe_name(p["id"])
+    for old in out.glob(sid + ".*"):                  # regenerating replaces the old take
+        if old.suffix.lower() in AUDIO_EXTS:
+            old.unlink()
+    dest = out / f"{sid}{_LAST['ext']}"
+    dest.write_bytes(_LAST["audio"])
+    return {"file": str(dest), "name": dest.name}
 
 R = Runner()
 HANDLERS = {
@@ -496,6 +634,11 @@ HANDLERS = {
     "diagnose": R.diagnose,
     "generate": R.generate,
     "download": R.download,
+    "list_takes": list_takes,
+    "mix": mix,
+    "eleven_generate": eleven_generate,
+    "eleven_voices": eleven_voices,
+    "api_save": api_save,
 }
 
 
