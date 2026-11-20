@@ -1,11 +1,4 @@
-"""MiniMax text-to-speech over plain HTTP. Replaces the Playwright/Chrome automation.
 
-Docs: POST {base}/v1/t2a_v2   (synchronous, non-streaming, audio returned hex-encoded in JSON)
-      POST {base}/v1/get_voice (list system / cloned / generated voices)
-Auth: Authorization: Bearer <API key>   (platform.minimax.io -> Account -> API Keys)
-
-Standard library only, so there is nothing new to pip install.
-"""
 import json
 import os
 import urllib.error

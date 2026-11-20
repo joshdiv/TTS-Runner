@@ -1,37 +1,143 @@
 #!/usr/bin/env python3
 """
-Script reader for the MiniMax TTS Runner.
+Script reader for the TTS Runner.
 
 Reads a recording script (PDF or Word) and returns:
     entries  = {id: dialogue_text}                 in script (file) order
     segments = [{"label": "Scene 1", "ids": [...]}, ...]   headings merged by label
 
-Understood ID shapes:
-    4+ parts: W01-HEN-SEQ-008, UNI-HEN-SEQ-004, ADD-W01-BIL-001, ADD-W01-GRP-RXN-001
-    3 parts : W02-HEN-001   (prefix must look like W02)
+Nothing about IDs or characters is built in. Both come from the rules the app passes
+to set_rules() (the Customize dialog, stored in id-rules.json):
 
-Understood headings: "Segment 02 ...", "STATE W2-01", "Scene 1" / "SCENE 01: Title".
+    {"characters": [
+        {"name": "Henry", "code": "HEN", "group": false,
+         "patterns": ["AAA-{HEN}-###", "AAA-{HEN}-AAA-###"]}
+    ]}
+
+Each pattern is a mask:
+    A      one uppercase letter
+    #      one digit
+    *      one letter or digit
+    {TEXT} the literal text TEXT  (the character's unique code goes in braces)
+    other  (- _ .) itself
+An ID belongs to the first character that has a pattern matching the whole ID.
+
+Scripts WITHOUT IDs are read by character name instead (used when no ID matches):
+    Henry: Hello everybody!          "Name: dialogue"
+    HENRY                            standard screenplay: a name in capitals on its own line,
+    Hello everybody!                 the dialogue directly under it, a blank line after
+IDs are then generated from the name: HENRY_001, HENRY_002 ... per character, in script order. A character's
+"aliases" (rules file) map other names in the script onto one character.
+
+Understood headings: "Segment 02 ...", "STATE W2-01", "Scene 1" / "SCENE 01: Title",
+and screenplay scene headings (INT. / EXT. ...).
 
 Dialogue is the quoted text after the ID. If an ID has NO quoted text but a bracketed
 line instead (e.g. [Laughter]), the bracketed text is kept as the line so it can be
 edited by hand into a sound tag.
 
-Usage for a quick check:  python audio_engine.py "My Script.docx"
+Quick check from the terminal:
+    python audio_engine.py "My Script.docx" id-rules.json
 """
+import json
 import re
 import sys
 from pathlib import Path
 
-# ----------------------------- patterns -----------------------------
-PAUSE_TAG = re.compile(r"<#[^#>]*#>")   # old pause tags are stripped from the script text
+# ----------------------------- ID rules -----------------------------
+_MASK_TOKENS = {"A": "[A-Z]", "#": r"\d", "*": "[A-Z0-9]"}
+_NEVER = r"(?!x)x"      # a regex that can never match (used while there are no rules)
 
-ID_IN_PDF = re.compile(
-    r"\b(?:"
-    r"[A-Z][A-Z0-9]{1,7}-[A-Z][A-Z0-9]{1,7}-[A-Z][A-Z0-9]{1,12}(?:-[A-Z][A-Z0-9]{1,12})?-\d{1,4}"
-    r"|[A-Z]\d{1,3}-[A-Z][A-Z0-9]{1,7}-\d{1,4}"
-    r")\b"
-)
-ID_FULL = re.compile(ID_IN_PDF.pattern.replace(r"\b", ""))
+
+def mask_to_regex(mask):
+    """Turn a format like 'AAA-{HEN}-###' into a regex string.
+    A = letter, # = digit, * = letter or digit, {TEXT} = literal text."""
+    mask = str(mask).strip()
+    if not mask:
+        raise ValueError("empty format")
+    out, i = [], 0
+    while i < len(mask):
+        ch = mask[i]
+        if ch == "{":
+            j = mask.find("}", i)
+            if j == -1 or j == i + 1:
+                raise ValueError(f"unclosed or empty {{...}} in '{mask}'")
+            out.append(re.escape(mask[i + 1:j]))
+            i = j + 1
+            continue
+        out.append(_MASK_TOKENS.get(ch.upper()) or re.escape(ch))
+        i += 1
+    return "".join(out)
+
+
+EXTENSION = re.compile(r"\s*\([^)]*\)\s*$")          # (V.O.) (CONT'D) after a screenplay name
+
+
+def _key(name):
+    """A speaker name in a comparable form: 'Col Landa (V.O.)' -> 'COL LANDA'."""
+    name = EXTENSION.sub("", str(name))
+    return re.sub(r"\s+", " ", name).strip(" .:").upper()
+
+
+# Rebuilt by set_rules(). The parser functions look them up each time they run.
+ID_IN_PDF = None   # finds IDs inside running text (PDF)
+ID_FULL = None     # matches a whole paragraph / table cell that is exactly one ID
+RULES = []         # [{"code", "name", "group", "regexes": [compiled, ...]}]
+ALIASES = {}       # speaker name in the script -> character code (code, name and aliases of every rule)
+GENERATED = {}     # IDs made up for scripts without IDs -> character code
+
+
+def set_rules(characters=()):
+    """Load the character rules. Raises ValueError if a rule is invalid."""
+    global ID_IN_PDF, ID_FULL, RULES, ALIASES
+    rules, every, seen, aliases = [], [], set(), {}
+    for c in characters or []:
+        code = str(c.get("code", "")).strip().upper()
+        if not code:
+            raise ValueError("a character has no code")
+        if code in seen:
+            raise ValueError(f"the code '{code}' is used twice")
+        seen.add(code)
+        pats = [mask_to_regex(m) for m in (c.get("patterns") or []) if str(m).strip()]
+        rules.append({"code": code, "name": c.get("name") or code, "group": bool(c.get("group")),
+                      "regexes": [re.compile(p) for p in pats]})
+        every += pats
+        for nm in [code, c.get("name")] + list(c.get("aliases") or []):
+            if nm and str(nm).strip():
+                aliases[_key(nm)] = code
+    every.sort(key=len, reverse=True)                    # prefer the longest format when searching running text
+    alt = "|".join(f"(?:{p})" for p in every) or _NEVER
+    ID_IN_PDF = re.compile(rf"\b(?:{alt})\b")
+    ID_FULL = re.compile(rf"(?:{alt})")
+    RULES = rules
+    ALIASES = aliases
+
+
+set_rules()
+
+
+def character_of(sid):
+    """Code of the character whose pattern matches this ID, or '' if none does."""
+    if sid in GENERATED:
+        return GENERATED[sid]
+    for r in RULES:
+        if any(rx.fullmatch(sid) for rx in r["regexes"]):
+            return r["code"]
+    return ""
+
+
+def rule_names():
+    """{code: display name} for every character listed in Customize."""
+    return {r["code"]: r["name"] for r in RULES}
+
+
+def group_codes():
+    """Codes of characters marked as group lines."""
+    return [r["code"] for r in RULES if r["group"]]
+
+
+# ----------------------------- other patterns -----------------------------
+PAUSE_TAG = re.compile(r"<#[^#>]*#>")   # old pause tags are stripped from the script text
 
 # Section headings. Add new heading styles here.
 SEGMENT_HEAD = re.compile(
@@ -41,12 +147,6 @@ QUOTE_GREEDY = re.compile(r"[\u201c\"](.*)[\u201d\"]", re.S)    # one paragraph 
 QUOTE_LAZY = re.compile(r"[\u201c\"](.*?)[\u201d\"]", re.S)     # PDF body may hold several things
 BRACKET_START = re.compile(r"\s*(\[.*?\])", re.S)
 SPEAKER_LABEL = re.compile(r"^[^\"\u201c\u201d\[\]:]{1,40}:\s*")
-
-# ID kinds that are NOT a character (so the character is the second part, e.g. UNI-HEN-SEQ-004 -> HEN)
-NON_CHARACTER_KINDS = {
-    "SEQ", "CUE", "REACT", "UTILITY", "TERM", "HUMOR", "FEED", "ACTION", "MOVE",
-    "GAMECALL", "ALT", "EMOTION", "TEACHER", "SIGNOFF", "SAFE", "LINE",
-}
 
 
 # ----------------------------- helpers -----------------------------
@@ -76,17 +176,6 @@ def _default_segments(order, size=20):
     n = len(order)
     return [{"label": f"Lines {i + 1}\u2013{min(i + size, n)}", "ids": order[i:i + size]}
             for i in range(0, n, size)]
-
-
-def character_of(sid):
-    """Speaker code from an ID: ADD-W01-BIL-001 -> BIL, ADD-W01-GRP-RXN-001 -> GRP,
-    W02-HEN-001 -> HEN, UNI-HEN-SEQ-004 -> HEN."""
-    parts = str(sid).split("-")
-    if len(parts) < 3:
-        return str(sid)
-    if len(parts) == 3:
-        return parts[1]
-    return parts[1] if parts[2] in NON_CHARACTER_KINDS else parts[2]
 
 
 # ----------------------------- Word script -----------------------------
@@ -231,13 +320,139 @@ def _load_script_pdf(path):
     return entries, segments
 
 
+# ----------------------------- scripts without IDs (names only) -----------------------------
+SCENE_HEAD = re.compile(r"^(?:INT|EXT|I/E)(?:\s*[./]\s*(?:INT|EXT))?\b[\s.\-/]", re.I)
+TRANSITION = re.compile(r"^(?:FADE (?:IN|OUT|TO)|CUT TO|DISSOLVE TO|SMASH CUT|MATCH CUT|THE END|CONTINUED)\b", re.I)
+LABEL_LINE = re.compile(r"^([A-Za-z][A-Za-z0-9 .'\-]{0,29}?)\s*:\s*(\S.*)$")      # Henry: dialogue
+CUE_LINE = re.compile(r"[A-Z][A-Z0-9 .'\-]*(?:\s*\([^)]*\))?")                      # HENRY   /   HENRY (V.O.)
+PAREN_LINE = re.compile(r"^\([^)]*\)$")                                              # (whispering)
+
+
+def _is_heading(line):
+    return bool(SCENE_HEAD.match(line) or SEGMENT_HEAD.match(line))
+
+
+def _is_cue(line):
+    return (bool(CUE_LINE.fullmatch(line)) and len(line.split()) <= 5
+            and not _is_heading(line) and not TRANSITION.match(line))
+
+
+def _code_for(key):
+    if key in ALIASES:
+        return ALIASES[key]
+    return re.sub(r"[^A-Z0-9]", "", key)[:24] or "SPK"
+
+
+def _raw_lines(path):
+    """Every line of the script, blank lines kept (they end a speech in screenplay layout)."""
+    if path.suffix.lower() in (".docx", ".docm"):
+        import zipfile
+        import xml.etree.ElementTree as ET
+        W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+        with zipfile.ZipFile(str(path)) as z:
+            root = ET.fromstring(z.read("word/document.xml"))
+        out = []
+        for p in root.find(W + "body").iter(W + "p"):
+            buf = []
+            for el in p.iter():
+                if el.tag == W + "t":
+                    buf.append(el.text or "")
+                elif el.tag == W + "br":
+                    buf.append("\n")
+                elif el.tag == W + "tab":
+                    buf.append(" ")
+            out.extend(_fix_dashes("".join(buf)).split("\n"))
+        return out
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        sys.exit("Missing package. Run:  pip install pypdf")
+    text = _fix_dashes("\n".join((page.extract_text() or "") for page in PdfReader(str(path)).pages))
+    return text.splitlines()
+
+
+def _parse_named(lines):
+    """Read a script that has character names instead of IDs. Two layouts, mixed freely:
+         Henry: dialogue (may continue on the next lines)
+         HENRY / dialogue lines / blank line          (standard screenplay)
+       Action lines, scene headings (INT./EXT.) and (parentheticals) are not dialogue.
+       A name is accepted when it is a character in the rules, appears at least twice, or
+       (screenplay layout with blank lines) stands alone above a speech."""
+    lines = [l.strip() for l in lines]
+    n = len(lines)
+    has_blanks = any(not l for l in lines)
+
+    def label(l):
+        m = LABEL_LINE.match(l)
+        return (_key(m.group(1)), m.group(2)) if m and not _is_heading(l) else None
+
+    seen = {}
+    for i, l in enumerate(lines):
+        lab = label(l)
+        k = lab[0] if lab else (_key(l) if _is_cue(l) and i + 1 < n and lines[i + 1] else None)
+        if k:
+            seen[k] = seen.get(k, 0) + 1
+
+    ok_label = lambda k: k in ALIASES or seen.get(k, 0) >= 2
+    ok_cue = lambda k: k in ALIASES or seen.get(k, 0) >= 2 or has_blanks
+    starts_new = lambda l: (_is_heading(l) or bool(label(l) and ok_label(label(l)[0]))
+                            or (_is_cue(l) and ok_cue(_key(l))))
+
+    GENERATED.clear()
+    entries, segments, counts, cur = {}, [], {}, None
+
+    def emit(key, text):
+        nonlocal cur
+        text = _clean_dialogue(text)
+        if not text:
+            return
+        code = _code_for(key)
+        counts[code] = counts.get(code, 0) + 1
+        sid = f"{code}_{counts[code]:03d}"
+        entries[sid] = text
+        GENERATED[sid] = code
+        if cur is None:
+            cur = _segment(segments, "Script")
+        cur["ids"].append(sid)
+
+    i = 0
+    while i < n:
+        l = lines[i]
+        i += 1
+        if not l:
+            continue
+        if _is_heading(l):
+            cur = _segment(segments, l)
+            continue
+        lab = label(l)
+        if lab and ok_label(lab[0]):
+            key, buf = lab
+            while i < n and lines[i] and not starts_new(lines[i]):
+                buf += " " + lines[i]
+                i += 1
+            emit(key, buf)
+        elif _is_cue(l) and ok_cue(_key(l)) and i < n and lines[i]:
+            key, buf = _key(l), []
+            while i < n and lines[i] and not starts_new(lines[i]):
+                if not PAREN_LINE.match(lines[i]):
+                    buf.append(lines[i])
+                i += 1
+            emit(key, " ".join(buf))
+    return entries, [sg for sg in segments if sg["ids"]]
+
+
 # ----------------------------- public API -----------------------------
 def load_script_full(path):
     """Read the recording script (PDF or Word). Returns (entries, segments)."""
     path = Path(path)
     if path.suffix.lower() in (".docx", ".docm"):
-        return _load_script_docx(path)
-    return _load_script_pdf(path)
+        entries, segments = _load_script_docx(path)
+    else:
+        entries, segments = _load_script_pdf(path)
+    if entries:                                   # the script has IDs the rules recognise
+        GENERATED.clear()
+        return entries, segments
+    return _parse_named(_raw_lines(path))         # otherwise read it by character name
 
 
 def load_script(path):
@@ -246,8 +461,13 @@ def load_script(path):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        sys.exit("Usage: python audio_engine.py <script.docx|script.pdf>")
+    if len(sys.argv) < 3:
+        sys.exit("Usage: python audio_engine.py <script.docx|script.pdf> <id-rules.json>")
+    try:
+        data = json.load(open(sys.argv[2], encoding="utf-8"))
+        set_rules(data["characters"] if isinstance(data, dict) else data)
+    except (ValueError, OSError, KeyError) as e:
+        sys.exit(f"Bad rules file: {e}")
     ents, segs = load_script_full(sys.argv[1])
     print(f"{len(ents)} IDs in {len(segs)} segments")
     for sg in segs:

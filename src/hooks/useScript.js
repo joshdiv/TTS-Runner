@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { EDITS_KEY, TAKES_DIR } from "../lib/constants";
 import { loadJSON, saveJSON } from "../lib/storage";
 import { call } from "../lib/engines";
-import { characterOf, folderFor, groupName, joinPath } from "../lib/paths";
+import { folderFor, groupName, joinPath } from "../lib/paths";
 import { analyzeScript, orderItems } from "../lib/script";
 import { isBracket } from "../lib/tags";
 
@@ -11,6 +11,8 @@ export function useScript({ settings, settingsRef, say, phase, setPhase, busyRef
   const [edits, setEdits] = useState(() => loadJSON(EDITS_KEY, {}));   // id -> { orig, text }
   const [scriptPath, setScriptPath] = useState("");
   const [items, setItems] = useState([]);
+  const [groups, setGroups] = useState([]);        // character codes marked "Group" in Customize
+  const [roster, setRoster] = useState([]);        // every character found: { code, name, count, known, omitted }
   const [done, setDone] = useState({});
   const [failed, setFailed] = useState({});
   const [takes, setTakes] = useState({});          // id -> ["BIL","REG",...] saved in the GRP folder
@@ -33,9 +35,10 @@ export function useScript({ settings, settingsRef, say, phase, setPhase, busyRef
   const analysis = useMemo(() => analyzeScript(items), [items]);
   const doneCount = useMemo(() => items.filter((i) => done[i.id]).length, [items, done]);
   const editedCount = useMemo(() => items.filter((i) => i.text !== i.orig).length, [items]);
+  // Characters in script order. Group codes are left out: they are mixes of the others.
   const characters = useMemo(
-    () => [...new Set([...items].sort((a, b) => a.n - b.n).map((i) => i.character).filter((c) => c && c !== "GRP"))],
-    [items]
+    () => [...new Set([...items].sort((a, b) => a.n - b.n).map((i) => i.character).filter((c) => c && !groups.includes(c)))],
+    [items, groups]
   );
 
   const changeOutDir = (dir) => { setOutDir(dir); outRef.current = dir; };
@@ -43,7 +46,7 @@ export function useScript({ settings, settingsRef, say, phase, setPhase, busyRef
   // Clears the workspace. Pass { edits } to also replace the saved text edits, { outDir } to keep a folder.
   function reset(next = {}) {
     if (next.edits !== undefined) setEdits(next.edits);
-    setScriptPath(""); setItems([]); setDone({}); setFailed({}); setTakes({});
+    setScriptPath(""); setItems([]); setGroups([]); setRoster([]); setDone({}); setFailed({}); setTakes({});
     setCur(0); setEditing(null); setScanInfo(null);
     changeOutDir(next.outDir || "");
     setPhase("idle");
@@ -130,15 +133,18 @@ export function useScript({ settings, settingsRef, say, phase, setPhase, busyRef
   }, [settings.viewSort]); // eslint-disable-line
 
   /* ---------------------------------------------------------------- loading */
+  // The engine reads the ID rules saved in Customize and returns each line's character and the group codes.
   async function loadScript(path, wantId, editsOverride) {
     const ed = editsOverride || edits;
     const r = await call("load_script", { path });
     const merged = r.items.map((it, n) => {
       const e = ed[it.id];
-      return { ...it, n, character: it.character || characterOf(it.id), orig: it.text, text: e && e.orig === it.text ? e.text : it.text };
+      return { ...it, n, orig: it.text, text: e && e.orig === it.text ? e.text : it.text };
     });
     const ordered = orderItems(merged, settingsRef.current.viewSort);
     setScriptPath(path);
+    setGroups(r.groups || []);
+    setRoster(r.roster || []);
     setItems(ordered);
     setFailed({});
     setEditing(null);
@@ -162,6 +168,29 @@ export function useScript({ settings, settingsRef, say, phase, setPhase, busyRef
     const path = await window.api.pickScript();
     if (!path) return false;
     try { await loadScript(path); return true; } catch (e) { say(`Script error: ${e.message}`); return false; }
+  }
+
+  // Read the current script again (after the ID rules changed), staying on the same line.
+  async function reloadScript() {
+    if (!scriptPath || busyRef.current) return false;
+    try { await loadScript(scriptPath, itemsRef.current[cur]?.id); return true; }
+    catch (e) { say(`Script error: ${e.message}`); return false; }
+  }
+
+  // Leave characters out of this script (or bring them back). Saved with the script's path in id-rules.json,
+  // so it is remembered; the engine drops their lines when the script is read again.
+  async function setOmitted(codes, omit) {
+    if (!scriptPath || !codes.length) return;
+    try {
+      const data = await window.api.rules.load();
+      const ignored = { ...(data.ignored || {}) };
+      const now = new Set(ignored[scriptPath] || []);
+      codes.forEach((c) => (omit ? now.add(c) : now.delete(c)));
+      if (now.size) ignored[scriptPath] = [...now]; else delete ignored[scriptPath];
+      await window.api.rules.save({ ...data, ignored });
+      say(`${omit ? "Omitted" : "Restored"} ${codes.join(", ")}.`);
+      await loadScript(scriptPath, itemsRef.current[cur]?.id);
+    } catch (e) { say(`Couldn't update the characters: ${e.message}`); }
   }
 
   async function chooseDir() {
@@ -218,7 +247,7 @@ export function useScript({ settings, settingsRef, say, phase, setPhase, busyRef
 
   return {
     // state
-    edits, scriptPath, items, done, failed, takes, cur, outDir, editing, scanInfo, scanning,
+    edits, scriptPath, items, groups, roster, done, failed, takes, cur, outDir, editing, scanInfo, scanning,
     // setters other hooks need
     setCur, setDone, setFailed, setTakes, setEditing,
     // refs
@@ -227,6 +256,6 @@ export function useScript({ settings, settingsRef, say, phase, setPhase, busyRef
     item, analysis, doneCount, editedCount, characters,
     // actions
     reset, changeOutDir, targetDir, candidateDirs, refreshTakes, refreshDone, scanFolder,
-    loadScript, chooseScript, chooseDir, saveEdit, bulkEdit, resetAllEdits,
+    loadScript, reloadScript, setOmitted, chooseScript, chooseDir, saveEdit, bulkEdit, resetAllEdits,
   };
 }

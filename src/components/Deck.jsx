@@ -38,12 +38,12 @@ export default function Deck({
         <span className="sep" />
         {tagMenu}
         {!reviewing ? (
-          <button className="btn" disabled={!outDir || working || auto} onClick={onReview} title="Plays every saved line from the selected one to the bottom">▶ Auto play</button>
+          <button className="btn" disabled={!outDir || working || auto} onClick={onReview} title="Plays every saved line from the selected one to the bottom">▶ Auto-play</button>
         ) : (
           <button className="btn stop" onClick={onStopReview}>■ Stop auto play</button>
         )}
         {!auto ? (
-          <button className="btn" disabled={!ready || working} onClick={onAuto}>Auto-run from here</button>
+          <button className="btn" disabled={!ready || working} onClick={onAuto}>Auto-Generate</button>
         ) : (
           <button className="btn stop" onClick={onStopAuto}>Stop after this line</button>
         )}

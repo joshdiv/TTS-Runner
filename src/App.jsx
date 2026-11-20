@@ -1,21 +1,22 @@
 import { useRef, useState } from "react";
-import Icon from "./components/Icon";
+import { Sidebar, SidebarTop, WindowControls } from "./components/Sidebar";
 import { useAudio } from "./hooks/useAudio";
 import { useGeneration } from "./hooks/useGeneration";
 import { useLog } from "./hooks/useLog";
 import { useProject } from "./hooks/useProject";
 import { useScript } from "./hooks/useScript";
 import { useSettings } from "./hooks/useSettings";
-import ActivityPage from "./pages/ActivityPage";
 import RunnerPage from "./pages/RunnerPage";
 import SettingsPage from "./pages/SettingsPage";
 import SetupPage from "./pages/SetupPage";
 
-const NAV = [["setup", "Setup", "upload"], ["run", "Runner", "play"], ["activity", "Activity Log", "activity"]];
+// Replaces the old File menu: same message shapes, delivered to useProject through api.onMenu
+const menu = (action) => () => window.api.emitMenu({ action });
 
 // App is only wiring: hooks own the state and logic, pages own the screens.
 export default function App() {
   const [page, setPage] = useState("setup");
+  const [collapsed, setCollapsed] = useState(false);        // sidebar hidden
   const [phase, setPhase] = useState("idle");               // idle | generating | ready | downloading
   const [sessionReady, setSessionReady] = useState(false);  // false until restore has finished (or the user picks something)
   const rowRefs = useRef({});
@@ -32,42 +33,70 @@ export default function App() {
 
   const ready = script.items.length > 0 && !!script.outDir;
   const byCharacter = settings.viewSort === "character";
+  const onRun = page === "run";
 
   const chooseScript = async () => { if (await script.chooseScript()) setSessionReady(true); };
   const chooseDir = async () => { if (await script.chooseDir()) setSessionReady(true); };
 
+  // File > Open project…
+  const openProject = async () => {
+    const r = await window.api.pickProjectOpen();
+    if (!r) return;
+    if (!r.ok) return say(`Couldn't open project: ${r.error}`);
+    window.api.emitMenu({ action: "open", ...r.result });   // { name, path, text }
+  };
+
+  // shared by the sidebar's top row and the window bar's copy of it (shown while the sidebar is hidden)
+  const topProps = {
+    onToggle: () => setCollapsed((c) => !c),
+    onOpen: openProject,
+    onSaveAs: menu("save-as"),
+    onSettings: () => setPage("settings"),
+  };
+
   return (
-    <div className="app" data-theme={settings.theme} data-text={settings.textSize} data-density={settings.density}>
-      <header className="topbar">
-        <nav className="tbgroup" aria-label="Pages">
-          {NAV.map(([id, label, icon]) => (
-            <button key={id} className={`tb ${page === id ? "active" : ""}`} title={label} onClick={() => setPage(id)}>
-              <Icon name={icon} /><span>{label}</span>
-            </button>
-          ))}
-        </nav>
-        <span style={{ flex: 1 }} />
-        {page === "run" && script.items.length > 0 && (
-          <button
-            className="btn small"
-            disabled={busy}
-            title="Change the order of the script lines"
-            onClick={() => set({ viewSort: byCharacter ? "scene" : "character" })}
-          >Sort: {byCharacter ? "By character" : "By scene"}</button>
-        )}
-      </header>
+    <div className={`app${collapsed ? " collapsed" : ""}`} data-theme={settings.theme} data-text={settings.textSize} data-density={settings.density}>
+      <Sidebar
+        page={page}
+        setPage={setPage}
+        onNew={menu("new")}
+        onOpenRecent={(item) => window.api.emitMenu({ action: "open-recent", item })}
+        currentPath={project.projectFile}
+        {...topProps}
+        disabled={busy}
+      />
 
       <div className="main">
-        <div className="content" style={page === "run" ? { overflow: "hidden" } : undefined}>
+        <header className="winbar">
+          {collapsed && <div className="winbar-left"><SidebarTop {...topProps} disabled={busy} /></div>}
+          <WindowControls />
+        </header>
+
+        <div className="content" style={onRun ? { overflow: "hidden", display: "flex", flexDirection: "column" } : undefined}>
+          {onRun && script.items.length > 0 && (
+            <div className="runbar">
+              <button
+                className="btn small"
+                disabled={busy}
+                title="Change the order of the script lines"
+                onClick={() => set({ viewSort: byCharacter ? "scene" : "character" })}
+              >Sort: {byCharacter ? "By character" : "By scene"}</button>
+            </div>
+          )}
+
           {page === "setup" && (
             <SetupPage
               script={script} settings={settings} set={set} setEngineCfg={setEngineCfg}
               ready={ready} busy={busy}
+              log={log} clearLog={clearLog}
               onChooseScript={chooseScript} onChooseDir={chooseDir} onOpenRunner={() => setPage("run")}
             />
           )}
-          {page === "run" && <RunnerPage script={script} gen={gen} audio={audio} settings={settings} ready={ready} rowRefs={rowRefs} />}
-          {page === "activity" && <ActivityPage script={script} gen={gen} log={log} clearLog={clearLog} timestamps={settings.timestamps} />}
+          {onRun && (
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <RunnerPage script={script} gen={gen} audio={audio} settings={settings} ready={ready} rowRefs={rowRefs} />
+            </div>
+          )}
           {page === "settings" && (
             <SettingsPage
               settings={settings} set={set} resetSettings={resetSettings} script={script} busy={busy}
@@ -76,13 +105,6 @@ export default function App() {
           )}
         </div>
       </div>
-
-      <footer className="statusbar">
-        <span className="sbname" title={project.projectFile || ""}>Project <b>{project.projectName || (script.scriptPath ? project.baseName() : "Untitled project")}</b></span>
-        {script.scriptPath && !project.projectFile && <span>Not saved to a file yet — File › Save project</span>}
-        <span className="sbspace" />
-        {project.savedAt && <span>{settings.autosaveProject && project.projectFile ? "Autosaved" : "Saved"} {project.savedAt}</span>}
-      </footer>
     </div>
   );
 }

@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "characters": [
+    {
+      "name": "Henry",
+      "code": "HEN",
+      "group": false,
+      "patterns": [
+        "A##-{HEN}-###",
+        "AAA-A##-{HEN}-###",
+        "AAA-{HEN}-AAA-###",
+        "AA-{HEN}-###"
+      ]
+    },
+    {
+      "name": "Billy",
+      "code": "BIL",
+      "group": false,
+      "patterns": [
+        "A##-{BIL}-###",
+        "AAA-A##-{BIL}-###",
+        "AAA-{BIL}-AAA-###",
+        "AA-{BIL}-###"
+      ]
+    },
+    {
+      "name": "Reggie",
+      "code": "REG",
+      "group": false,
+      "patterns": [
+        "A##-{REG}-###",
+        "AAA-A##-{REG}-###",
+        "AAA-{REG}-AAA-###",
+        "AA-{REG}-###"
+      ]
+    },
+    {
+      "name": "Willy",
+      "code": "WIL",
+      "group": false,
+      "patterns": [
+        "A##-{WIL}-###",
+        "AAA-A##-{WIL}-###",
+        "AAA-{WIL}-AAA-###",
+        "AA-{WIL}-###"
+      ]
+    },
+    {
+      "name": "LUC",
+      "code": "LUC",
+      "group": false,
+      "patterns": [
+        "A##-{LUC}-###",
+        "AAA-A##-{LUC}-###",
+        "AAA-{LUC}-AAA-###",
+        "AA-{LUC}-###"
+      ]
+    },
+    {
+      "name": "SHA",
+      "code": "SHA",
+      "group": false,
+      "patterns": [
+        "A##-{SHA}-###",
+        "AAA-A##-{SHA}-###",
+        "AAA-{SHA}-AAA-###",
+        "AA-{SHA}-###"
+      ]
+    },
+    {
+      "name": "RXN",
+      "code": "RXN",
+      "group": false,
+      "patterns": [
+        "A##-{RXN}-###",
+        "AAA-A##-{RXN}-###",
+        "AAA-{RXN}-AAA-###",
+        "AA-{RXN}-###"
+      ]
+    },
+    {
+      "name": "Group",
+      "code": "GRP",
+      "group": true,
+      "patterns": [
+        "AAA-A##-{GRP}-AAA-###"
+      ]
+    }
+  ]
+}
