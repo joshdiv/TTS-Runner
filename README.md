@@ -1,9 +1,14 @@
 > [!NOTE]
 > Download only from this official repository: [github.com/joshdiv/tts-runner](https://github.com/joshdiv/tts-runner).
 
-# TTS Runner: Turn a Voiceover Script into Finished Audio Clips
 
-Load your recording script, and TTS Runner generates every line with ElevenLabs or MiniMax, then saves each clip named by its dialogue ID, ready to drop into your project.
+<p align="center">
+  <img src="src/assets/ttsrunner-icon.png" alt="TTS Runner main window" width="300">
+</p>
+
+<div align="center">
+# Voiceover Script into Finished Audio Clips
+</div>
 
 <div align="center">
 
@@ -13,19 +18,13 @@ Load your recording script, and TTS Runner generates every line with ElevenLabs 
 
 </div>
 
-
-<p align="center">
-  <img src="src/assets/ttsrunner-icon.png" alt="TTS Runner main window" width="300">
-</p>
-
 <div align="center">
-
-Turn a voiceover script into finished audio clips.
 
 [⬇ Download](https://github.com/joshdiv/tts-runner/releases/latest) · [Quick start](#quick-start) · [FAQ](#faq)
 
 </div>
 
+Load your recording script, and TTS Runner generates every line with ElevenLabs or MiniMax, then saves each clip named by its dialogue ID, ready to drop into your project.
 
 TTS Runner is a free, open-source (MIT) desktop app for Windows. It reads a numbered recording script (Word or PDF), lists every dialogue line, sends each one to the text-to-speech engine you choose, and saves the audio as `DIALOGUE-001.mp3`, `LINE-003-001.mp3`, and so on. You listen, regenerate the takes you don't like, and export the lot.
 
