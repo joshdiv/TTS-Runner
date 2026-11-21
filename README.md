@@ -11,7 +11,10 @@ Load your recording script, and TTS Runner generates every line with ElevenLabs 
 
 [⬇ Download (Installer)](https://github.com/joshdiv/tts-runner/releases/latest) · [Quick start](#quick-start) · [Screenshots](#see-it-in-action) · [FAQ](#faq) · [Get help](#help-and-support)
 
-![TTS Runner main window showing a script being generated line by line](src/assets/ttsrunner-icon.png)
+<p align="center">
+  <img src="src/assets/ttsrunner-icon.png" alt="TTS Runner main window" width="800">
+</p>
+
 
 TTS Runner is a free, open-source (MIT) desktop app for Windows. It reads a numbered recording script (Word or PDF), lists every dialogue line, sends each one to the text-to-speech engine you choose, and saves the audio as `DIALOGUE-001.mp3`, `LINE-003-001.mp3`, and so on. You listen, regenerate the takes you don't like, and export the lot.
 
