@@ -8,12 +8,6 @@
 
 <div align="center">
 
-# Voiceover Script into Finished Audio Clips
-
-</div>
-
-<div align="center">
-
 ![Latest Release](https://img.shields.io/github/v/release/joshdiv/tts-runner)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Platform: Windows](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-blue)
