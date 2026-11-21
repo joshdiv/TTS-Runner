@@ -5,11 +5,23 @@
 
 Load your recording script, and TTS Runner generates every line with ElevenLabs or MiniMax, then saves each clip named by its dialogue ID, ready to drop into your project.
 
+<div align="center">
+
 ![Latest Release](https://img.shields.io/github/v/release/joshdiv/tts-runner)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Platform: Windows](https://img.shields.io/badge/Platform-Windows%2010%20%7C%2011-blue)
 
-[⬇ Download (Installer)](https://github.com/joshdiv/tts-runner/releases/latest) · [Quick start](#quick-start) · [Screenshots](#see-it-in-action) · [FAQ](#faq) · [Get help](#help-and-support)
+</div>
+
+<div align="center">
+
+# TTS Runner
+
+Turn a voiceover script into finished audio clips.
+
+[⬇ Download](https://github.com/joshdiv/tts-runner/releases/latest) · [Quick start](#quick-start) · [FAQ](#faq)
+
+</div>
 
 <p align="center">
   <img src="src/assets/ttsrunner-icon.png" alt="TTS Runner main window" width="300">
