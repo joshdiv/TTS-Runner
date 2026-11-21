@@ -12,7 +12,7 @@ Load your recording script, and TTS Runner generates every line with ElevenLabs 
 [⬇ Download (Installer)](https://github.com/joshdiv/tts-runner/releases/latest) · [Quick start](#quick-start) · [Screenshots](#see-it-in-action) · [FAQ](#faq) · [Get help](#help-and-support)
 
 <p align="center">
-  <img src="src/assets/ttsrunner-icon.png" alt="TTS Runner main window" width="800">
+  <img src="src/assets/ttsrunner-icon.png" alt="TTS Runner main window" width="300">
 </p>
 
 
