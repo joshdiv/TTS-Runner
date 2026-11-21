@@ -13,15 +13,6 @@ Load your recording script, and TTS Runner generates every line with ElevenLabs 
 
 </div>
 
-<div align="center">
-
-# TTS Runner
-
-Turn a voiceover script into finished audio clips.
-
-[⬇ Download](https://github.com/joshdiv/tts-runner/releases/latest) · [Quick start](#quick-start) · [FAQ](#faq)
-
-</div>
 
 <p align="center">
   <img src="src/assets/ttsrunner-icon.png" alt="TTS Runner main window" width="300">
