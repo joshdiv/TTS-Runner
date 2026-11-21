@@ -1,14 +1,6 @@
 import { useEffect, useState } from "react";
 import { Toggle } from "./ui";
 
-/* Customize: who the characters are and how the script refers to them.
-   Stored as JSON (id-rules.json) through the app; the script reader uses nothing else.
-
-   { characters: [ { name, code, group, patterns: ["AAA-{HEN}-###"], aliases: ["NAZI OFFICER"] } ] }
-
-   Layout: the list of characters on the left, the selected character's details on the right,
-   so only one character's settings are on screen at a time. */
-
 const VALID = /^[A#*{}\w.\-]+$/i;
 const clean = (s) => String(s).toUpperCase().replace(/[^A-Z0-9]/g, "");
 const enter = (fn) => (e) => { if (e.key === "Enter") fn(); };

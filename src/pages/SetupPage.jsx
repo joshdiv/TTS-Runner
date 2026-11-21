@@ -16,11 +16,12 @@ const GearIcon = () => (
 );
 
 /* One small card: uppercase title, italic hint, buttons underneath */
-const Tile = ({ area, title, sub, children }) => (
-  <section className={`tile ${area}`}>
+const Tile = ({ area, title, sub, busy, children }) => (
+  <section className={`tile ${area}`} aria-busy={busy || undefined}>
     <h3>{title}</h3>
     {sub && <p title={sub}>{sub}</p>}
     <div className="tilebtns">{children}</div>
+    {busy && <div className="loadbar" role="progressbar" aria-label={title}><i /></div>}
   </section>
 );
 
@@ -33,6 +34,7 @@ export default function SetupPage({
   onChooseScript, onChooseDir, onOpenRunner,
 }) {
   const { scriptPath, outDir, items, scanning, characters } = script;
+  const loading = !!script.loadingPath;                // a script is being read
   const engine = settings.engine;
   const engineLabel = ENGINES.find(([v]) => v === engine)?.[1] ?? engine;
 
@@ -52,8 +54,15 @@ export default function SetupPage({
       <img className="setuplogo" src={logo} alt="TTS Runner" draggable="false" />
 
       <div className="setboard">
-        <Tile area="t-script" title={scriptPath ? "Script loaded" : "No script chosen"} sub={scriptPath ? lastSegment(scriptPath) : "Choose a .docx or .pdf script"}>
-          <button className="btn primary small" onClick={onChooseScript}>{scriptPath ? "Change" : "Choose script"}</button>
+        <Tile
+          area="t-script"
+          busy={loading}
+          title={loading ? "Reading script…" : scriptPath ? "Script loaded" : "No script chosen"}
+          sub={loading ? lastSegment(script.loadingPath) : scriptPath ? lastSegment(scriptPath) : "Choose a .docx or .pdf script"}
+        >
+          <button className="btn primary small" onClick={onChooseScript} disabled={loading}>
+            {loading ? "Reading…" : scriptPath ? "Change" : "Choose script"}
+          </button>
         </Tile>
 
         <Tile area="t-output" title="Output folder" sub={outDir || "Where generated audio files are saved"}>
@@ -76,7 +85,7 @@ export default function SetupPage({
         </Tile>
 
         <Tile area="t-ids" title="ID formats & characters" sub="Teach the app how your line IDs look">
-          <button className="btn primary small" onClick={() => setDialog("customize")}>Customize</button>
+          <button className="btn primary small" onClick={() => setDialog("customize")} disabled={loading}>Customize</button>
         </Tile>
 
         <div className="area-summary">
@@ -89,7 +98,8 @@ export default function SetupPage({
             doneCount={script.doneCount}
             roster={script.roster}
             ready={ready}
-            busy={busy}
+            busy={busy || loading}
+            loading={loading}
             onOpenRunner={onOpenRunner}
             onOmit={(codes) => script.setOmitted(codes, true)}
             onRestore={(codes) => script.setOmitted(codes, false)}

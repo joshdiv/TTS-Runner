@@ -1,7 +1,7 @@
 import { PHASE_LABEL } from "../lib/constants";
 import { isBracket } from "../lib/tags";
 
-// Voices panel under a group (GRP) line: one take per character, then Mix.
+
 export default function GroupPanel({
   it, characters, have, takeKey, phase, working, auto, ready, mixing, isDone, showPreview, playing,
   onMake, onSaveTake, onPlayTake, onPlayPending, onPlayMix, onMix,

@@ -11,9 +11,19 @@ const pending = new Map();
 
 // ---------- Python bridge (one JSON object per line, same protocol as your server.py) ----------
 function startPython() {
-  const cmd = process.env.PYTHON || (process.platform === "win32" ? "python" : "python3");
-  const script = path.join(__dirname, "..", "python", "tts_server.py");
-  py = spawn(cmd, ["-u", script], { stdio: ["pipe", "pipe", "pipe"] });
+  const env = { ...process.env, PYTHONUNBUFFERED: "1" };
+
+  if (app.isPackaged) {
+    // Installed app: run the bundled exe and point it at the bundled ffmpeg
+    const exe = path.join(process.resourcesPath, "backend", "tts_server.exe");
+    env.FFMPEG_PATH = path.join(process.resourcesPath, "bin", "ffmpeg.exe");
+    py = spawn(exe, [], { stdio: ["pipe", "pipe", "pipe"], env, windowsHide: true });
+  } else {
+    // Development: run the Python file like before
+    const cmd = process.env.PYTHON || (process.platform === "win32" ? "python" : "python3");
+    const script = path.join(__dirname, "..", "python", "tts_server.py");
+    py = spawn(cmd, ["-u", script], { stdio: ["pipe", "pipe", "pipe"], env });
+  }
 
   readline.createInterface({ input: py.stdout }).on("line", (line) => {
     let msg;
@@ -24,7 +34,7 @@ function startPython() {
     p.resolve(msg.ok ? { ok: true, result: msg.result } : { ok: false, error: msg.error });
   });
   py.stderr.on("data", (d) => win && win.webContents.send("engine-log", d.toString()));
-  py.on("error", (err) => failAll(`Could not start Python (${cmd}): ${err.message}`));
+  py.on("error", (err) => failAll(`Could not start the engine: ${err.message}`));
   py.on("exit", (code) => { failAll(`Python engine exited (code ${code})`); py = null; });
 }
 
@@ -213,4 +223,13 @@ app.whenReady().then(() => {
   createWindow();
 });
 
-app.on("window-all-closed", () => { if (py) py.kill(); app.quit(); });
+function stopPython() {
+  if (!py) return;
+  if (process.platform === "win32") {
+    spawn("taskkill", ["/pid", String(py.pid), "/f", "/t"]);  // kills it and its child
+  } else {
+    py.kill();
+  }
+}
+
+app.on("window-all-closed", () => { stopPython(); app.quit(); });

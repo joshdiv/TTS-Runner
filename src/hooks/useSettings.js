@@ -8,7 +8,6 @@ export function useSettings() {
   settingsRef.current = settings;
 
   const set = useCallback((patch) => setSettings((s) => ({ ...s, ...patch })), []);
-  // Patch one engine's block: setEngineCfg("minimax", { model: "speech-2.6-hd" })
   const setEngineCfg = useCallback((engine, patch) => setSettings((s) => ({ ...s, [engine]: { ...s[engine], ...patch } })), []);
   const resetSettings = useCallback(() => setSettings(DEFAULTS), []);
 

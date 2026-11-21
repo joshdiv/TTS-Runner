@@ -42,7 +42,7 @@ const CharGroup = ({ title, hint, all, className, children }) => (
 
 // Summary card on Setup: which characters were found, how far along the script is, and what looks off.
 export default function ScriptSummary({
-  items, analysis, characters, roster = [], scriptPath, fileName, doneCount, ready, busy,
+  items, analysis, characters, roster = [], scriptPath, fileName, doneCount, ready, busy, loading = false,
   onOpenRunner, onOmit, onRestore,
 }) {
   const [showFull, setShowFull] = useState(false);
@@ -80,19 +80,28 @@ export default function ScriptSummary({
   };
 
   return (
-    <div className="check">
+    <div className={`check${loading ? " is-loading" : ""}`} aria-busy={loading}>
       {/* header: title + filename on the left, issue flag on the right (same look as the tiles) */}
       <div className="sumhead">
         <div>
           <h3>Script summary</h3>
           <p title={scriptPath}>{hasScript ? fileName : "Choose a script to see its summary."}</p>
         </div>
-        {items.length > 0 && (
+        {loading ? (
+          <span className="checkflag"><i className="spinner" /> Reading…</span>
+        ) : items.length > 0 && (
           <span className={`checkflag ${problems ? "warn" : ""}`}>
             {problems ? `${problems} thing${problems === 1 ? "" : "s"} to look at` : "No issues found"}
           </span>
         )}
       </div>
+
+      {loading && !hasScript && (
+        <div className="sumload">
+          <div className="loadbar" role="progressbar" aria-label="Reading the script"><i /></div>
+          <p className="panelhint">Reading the script. A long PDF takes a little while the first time.</p>
+        </div>
+      )}
 
       {hasScript && (
         <>

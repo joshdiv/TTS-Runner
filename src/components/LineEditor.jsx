@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { applyEmotion } from "../lib/tags";
 
-// apiRef lets the Add Tags popup act on this editor's draft and cursor.
 export default function LineEditor({ initial, onSave, onCancel, apiRef }) {
   const [draft, setDraft] = useState(initial);
   const ref = useRef(null);
@@ -13,7 +12,7 @@ export default function LineEditor({ initial, onSave, onCancel, apiRef }) {
     ref.current?.setSelectionRange(draft.length, draft.length);
     if (apiRef) {
       apiRef.current = {
-        // Inserts (name) at the cursor, replacing any selected text, with a space on each side where needed.
+
         insertSound: (name, open = "(", close = ")") => {
           const el = ref.current; const v = draftRef.current;
           if (!el) return;

@@ -9,8 +9,7 @@ export const call = async (type, payload) => {
 
 const SOUND_RE = new RegExp(`\\((${[...SOUNDS, ...Object.keys(SOUND_ALIASES)].join("|")})\\)`, "gi");
 
-// MiniMax: emotion goes in voice_setting (not in the text). Interjections like (laughs) only work on speech-2.8;
-// on other models they are removed, and any leftover [bracket] text is dropped so it is never read aloud.
+
 export function minimaxText(raw, model) {
   const { text, emotion } = splitEmotion(raw);
   const keepSounds = minimaxSoundTags(model).length > 0;
@@ -22,7 +21,7 @@ export function minimaxText(raw, model) {
   return { text: t, emotion: minimaxEmotions(model).includes(emotion) ? emotion : "" };
 }
 
-// ElevenLabs v3/v4 read [laughs]-style audio tags. Other models would speak them aloud, so they're removed.
+
 export function elevenText(raw, model) {
   const { text, emotion } = splitEmotion(raw);
   let t = text;
@@ -37,7 +36,7 @@ export function elevenText(raw, model) {
 
 export const voiceFor = (cfg, character) => (cfg.voices || {})[character] || cfg.voiceId;
 
-// Builds the [requestType, payload] pair for generating one line (or one character's take of a group line).
+
 export function buildGenerate(settings, it, character) {
   const ch = character || it.character;
   if (settings.engine === "elevenlabs") {

@@ -11,8 +11,6 @@ const VoiceSelect = ({ value, list, onPick, blank }) => (
   </select>
 );
 
-// Settings for the chosen engine: key, model, voice parameters, and a voice per character.
-// `cfg` is settings.minimax or settings.elevenlabs; `onChange(patch)` merges into it.
 export default function EnginePanel({ engine, cfg, onChange, characters }) {
   const [msg, setMsg] = useState("");
   const mini = engine === "minimax";

@@ -1,15 +1,4 @@
-"""
-ElevenLabs text-to-speech client.
 
-Only talks to the ElevenLabs API: no files, no saved state, no app protocol. The server
-(tts_server.py) calls these two functions and decides what to do with the result.
-
-    voices(p)      -> {"voices": [{"id", "name", "category"}, ...]}     cloned voices first
-    synthesize(p)  -> (audio_bytes, {"seconds", "mime", "ext"})
-
-p is the request payload from the app: apiKey, text, voiceId, model, stability,
-similarity, style, speed. The key falls back to the ELEVENLABS_API_KEY environment variable.
-"""
 import json
 import os
 import re

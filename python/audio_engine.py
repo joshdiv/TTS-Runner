@@ -1,47 +1,7 @@
-#!/usr/bin/env python3
-"""
-Script reader for the TTS Runner.
-
-Reads a recording script (PDF or Word) and returns:
-    entries  = {id: dialogue_text}                 in script (file) order
-    segments = [{"label": "Scene 1", "ids": [...]}, ...]   headings merged by label
-
-Nothing about IDs or characters is built in. Both come from the rules the app passes
-to set_rules() (the Customize dialog, stored in id-rules.json):
-
-    {"characters": [
-        {"name": "Henry", "code": "HEN", "group": false,
-         "patterns": ["AAA-{HEN}-###", "AAA-{HEN}-AAA-###"]}
-    ]}
-
-Each pattern is a mask:
-    A      one uppercase letter
-    #      one digit
-    *      one letter or digit
-    {TEXT} the literal text TEXT  (the character's unique code goes in braces)
-    other  (- _ .) itself
-An ID belongs to the first character that has a pattern matching the whole ID.
-
-Scripts WITHOUT IDs are read by character name instead (used when no ID matches):
-    Henry: Hello everybody!          "Name: dialogue"
-    HENRY                            standard screenplay: a name in capitals on its own line,
-    Hello everybody!                 the dialogue directly under it, a blank line after
-IDs are then generated from the name: HENRY_001, HENRY_002 ... per character, in script order. A character's
-"aliases" (rules file) map other names in the script onto one character.
-
-Understood headings: "Segment 02 ...", "STATE W2-01", "Scene 1" / "SCENE 01: Title",
-and screenplay scene headings (INT. / EXT. ...).
-
-Dialogue is the quoted text after the ID. If an ID has NO quoted text but a bracketed
-line instead (e.g. [Laughter]), the bracketed text is kept as the line so it can be
-edited by hand into a sound tag.
-
-Quick check from the terminal:
-    python audio_engine.py "My Script.docx" id-rules.json
-"""
 import json
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 
 # ----------------------------- ID rules -----------------------------
@@ -287,7 +247,7 @@ def _load_script_pdf(path):
     try:
         from pypdf import PdfReader
     except ImportError:
-        sys.exit("Missing package. Run:  pip install pypdf")
+        raise RuntimeError("Reading PDFs needs a package. Run:  pip install pdfplumber")
     reader = PdfReader(str(path))
     text = _fix_dashes("\n".join((page.extract_text() or "") for page in reader.pages))
     parts = ID_IN_PDF.split(text)
@@ -326,15 +286,46 @@ TRANSITION = re.compile(r"^(?:FADE (?:IN|OUT|TO)|CUT TO|DISSOLVE TO|SMASH CUT|MA
 LABEL_LINE = re.compile(r"^([A-Za-z][A-Za-z0-9 .'\-]{0,29}?)\s*:\s*(\S.*)$")      # Henry: dialogue
 CUE_LINE = re.compile(r"[A-Z][A-Z0-9 .'\-]*(?:\s*\([^)]*\))?")                      # HENRY   /   HENRY (V.O.)
 PAREN_LINE = re.compile(r"^\([^)]*\)$")                                              # (whispering)
+PAGE_NUMBER = re.compile(r"^\d{1,3}\.?$")                                            # 22.   (a page number on its own line)
+PAGE_FURNITURE = re.compile(r"^\(?\s*(?:MORE|CONTINUED|CONT'D|CONTINUING)\s*\)?\s*:?$", re.I)
+SCENE_NUM_BOTH = re.compile(r"^(\d+[A-Z]{0,2})\s+(.+?)\s+\1$")                        # 40  FLASHBACK   40
+SCENE_NUM_GLUED = re.compile(r"^(.*?)(\d+[A-Z]{0,2})\s+\2$")                          # INT. ABATTOIR - LATER2 2
+ABBREV_END = re.compile(r"\b(?:JR|SR|MR|MRS|MS|DR|ST)\.$")
 
 
-def _is_heading(line):
-    return bool(SCENE_HEAD.match(line) or SEGMENT_HEAD.match(line))
+def _heading(text):
+    """The scene name if this line is a scene heading (scene numbers removed), else None."""
+    m = SCENE_NUM_BOTH.match(text)
+    if m and m.group(2) == m.group(2).upper():
+        return " ".join(m.group(2).split())
+    if text == text.upper():
+        g = SCENE_NUM_GLUED.match(text)
+        if g and g.group(1).strip():
+            return " ".join(g.group(1).split())
+    if SCENE_HEAD.match(text) or SEGMENT_HEAD.match(text):
+        return " ".join(text.split())
+    return None
 
 
-def _is_cue(line):
-    return (bool(CUE_LINE.fullmatch(line)) and len(line.split()) <= 5
-            and not _is_heading(line) and not TRANSITION.match(line))
+def _is_cue_text(t):
+    """Could this line be a speaker name? Short, capitals, no sentence punctuation at the end."""
+    if not CUE_LINE.fullmatch(t) or len(t.split()) > 5:
+        return False
+    bare = EXTENSION.sub("", t).strip()
+    if bare.endswith((".", ":", "-")) and not ABBREV_END.search(bare):
+        return False                                    # "RIDE IN ON THEIR CARRIAGE."  "CUT TO:"
+    return not (_heading(t) or TRANSITION.match(t))
+
+
+def _join(parts):
+    """Join wrapped dialogue lines. A line ending in a single hyphen joins the next one without a space."""
+    out = ""
+    for p in parts:
+        if out.endswith("-") and not out.endswith("--") and p[:1].islower():
+            out += p
+        else:
+            out += (" " if out else "") + p
+    return out
 
 
 def _code_for(key):
@@ -343,60 +334,116 @@ def _code_for(key):
     return re.sub(r"[^A-Z0-9]", "", key)[:24] or "SPK"
 
 
-def _raw_lines(path):
-    """Every line of the script, blank lines kept (they end a speech in screenplay layout)."""
-    if path.suffix.lower() in (".docx", ".docm"):
-        import zipfile
-        import xml.etree.ElementTree as ET
-        W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
-        with zipfile.ZipFile(str(path)) as z:
-            root = ET.fromstring(z.read("word/document.xml"))
-        out = []
-        for p in root.find(W + "body").iter(W + "p"):
-            buf = []
-            for el in p.iter():
-                if el.tag == W + "t":
-                    buf.append(el.text or "")
-                elif el.tag == W + "br":
-                    buf.append("\n")
-                elif el.tag == W + "tab":
-                    buf.append(" ")
-            out.extend(_fix_dashes("".join(buf)).split("\n"))
-        return out
+# ---- reading the file into lines: (indent, text), blank lines kept ----
+_LINES_CACHE = {}       # the latest script's lines, so changing a rule does not read the file again
+
+
+def _pdf_lines(path):
+    """Every line of a PDF with its indentation. pdfplumber reads words correctly; pypdf is the fallback."""
+    pages = None
     try:
-        from pypdf import PdfReader
+        import pdfplumber
+        with pdfplumber.open(str(path)) as pdf:
+            pages = [(pg.extract_text(layout=True) or "") for pg in pdf.pages]
     except ImportError:
-        sys.exit("Missing package. Run:  pip install pypdf")
-    text = _fix_dashes("\n".join((page.extract_text() or "") for page in PdfReader(str(path)).pages))
-    return text.splitlines()
+        pass
+    if pages is None:
+        try:
+            from pypdf import PdfReader
+        except ImportError:
+            raise RuntimeError("Reading PDFs needs a package. Run:  pip install pdfplumber")
+        pages = []
+        for pg in PdfReader(str(path)).pages:
+            try:
+                pages.append(pg.extract_text(extraction_mode="layout") or "")
+            except TypeError:                                   # older pypdf: no layout mode
+                pages.append(pg.extract_text() or "")
+    out = []
+    for text in pages:
+        rows = [_fix_dashes(l.replace("\xa0", " ").rstrip()) for l in text.split("\n")]
+        # a page number (or "CONTINUED:") near the top or bottom of the page is page furniture, not script
+        filled = [k for k, r in enumerate(rows) if r.strip()]
+        for k in filled[:2] + filled[-2:]:
+            t = " ".join(rows[k].split())
+            if PAGE_NUMBER.match(t) or PAGE_FURNITURE.match(t):
+                rows[k] = ""
+        while rows and not rows[0].strip():                     # blank lines at the top and bottom of a page are page
+            rows.pop(0)                                         # margins; keeping them would cut a speech that runs
+        while rows and not rows[-1].strip():                    # over a page break
+            rows.pop()
+        for l in rows:
+            out.append((len(l) - len(l.lstrip(" ")), " ".join(l.split())))
+    return out
+
+
+def _docx_lines(path):
+    """Every line of a Word file. Indent comes from the paragraph's left indent (about 144 twips per column)."""
+    import zipfile
+    import xml.etree.ElementTree as ET
+    W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    with zipfile.ZipFile(str(path)) as z:
+        root = ET.fromstring(z.read("word/document.xml"))
+    out = []
+    for p in root.find(W + "body").iter(W + "p"):
+        indent = 0
+        ppr = p.find(W + "pPr")
+        if ppr is not None:
+            ind = ppr.find(W + "ind")
+            if ind is not None:
+                try:
+                    indent = round(int(ind.get(W + "left") or ind.get(W + "start") or 0) / 144)
+                except ValueError:
+                    pass
+            jc = ppr.find(W + "jc")
+            if jc is not None and jc.get(W + "val") == "center":
+                indent = max(indent, 36)
+        buf = []
+        for el in p.iter():
+            if el.tag == W + "t":
+                buf.append(el.text or "")
+            elif el.tag == W + "br":
+                buf.append("\n")
+            elif el.tag == W + "tab":
+                buf.append(" ")
+        for line in _fix_dashes("".join(buf)).split("\n"):
+            out.append((indent, " ".join(line.split())))
+    return out
+
+
+def _raw_lines(path):
+    path = Path(path)
+    st = path.stat()
+    key = (str(path), st.st_mtime_ns, st.st_size)
+    if key not in _LINES_CACHE:
+        _LINES_CACHE.clear()
+        _LINES_CACHE[key] = _docx_lines(path) if path.suffix.lower() in (".docx", ".docm") else _pdf_lines(path)
+    return _LINES_CACHE[key]
 
 
 def _parse_named(lines):
-    """Read a script that has character names instead of IDs. Two layouts, mixed freely:
+    """Read a script that has character names instead of IDs.
+
+       Screenplay layout (when the file keeps indentation): action sits at the margin, dialogue is
+       indented, and speaker names are indented furthest. That is enough to tell them apart, so
+       page numbers, scene numbers, action lines and all-caps shouting inside action are ignored.
+
+       Otherwise two plain-text layouts, mixed freely:
          Henry: dialogue (may continue on the next lines)
-         HENRY / dialogue lines / blank line          (standard screenplay)
-       Action lines, scene headings (INT./EXT.) and (parentheticals) are not dialogue.
-       A name is accepted when it is a character in the rules, appears at least twice, or
-       (screenplay layout with blank lines) stands alone above a speech."""
-    lines = [l.strip() for l in lines]
-    n = len(lines)
-    has_blanks = any(not l for l in lines)
+         HENRY / dialogue lines / blank line
+       In plain text a name is accepted when it is a character in the rules, appears at least twice,
+       or (with blank lines in the script) stands alone above a speech.
 
-    def label(l):
-        m = LABEL_LINE.match(l)
-        return (_key(m.group(1)), m.group(2)) if m and not _is_heading(l) else None
-
-    seen = {}
-    for i, l in enumerate(lines):
-        lab = label(l)
-        k = lab[0] if lab else (_key(l) if _is_cue(l) and i + 1 < n and lines[i + 1] else None)
-        if k:
-            seen[k] = seen.get(k, 0) + 1
-
-    ok_label = lambda k: k in ALIASES or seen.get(k, 0) >= 2
-    ok_cue = lambda k: k in ALIASES or seen.get(k, 0) >= 2 or has_blanks
-    starts_new = lambda l: (_is_heading(l) or bool(label(l) and ok_label(label(l)[0]))
-                            or (_is_cue(l) and ok_cue(_key(l))))
+       lines: [(indent, text)] or plain strings. Parentheticals like (whispering) are dropped."""
+    rows = []
+    for item in lines:
+        indent, text = item if isinstance(item, tuple) else (0, item)
+        text = " ".join(str(text).split())
+        if text and (PAGE_NUMBER.match(text) or PAGE_FURNITURE.match(text)):
+            continue                                            # page numbers, (MORE), CONTINUED:
+        rows.append((indent, text))
+    ind = [r[0] for r in rows]
+    txt = [r[1] for r in rows]
+    n = len(rows)
 
     GENERATED.clear()
     entries, segments, counts, cur = {}, [], {}, None
@@ -415,40 +462,113 @@ def _parse_named(lines):
             cur = _segment(segments, "Script")
         cur["ids"].append(sid)
 
+    # --- does the file keep screenplay indentation? base = action margin, cue_min = where names start
+    filled = [(i, t) for i, t in rows if t]
+    long_counts = Counter(i for i, t in filled if len(t) > 30 and t != t.upper())
+    cue_min = None
+    if long_counts:
+        floor = min(max(5, 0.03 * sum(long_counts.values())), max(long_counts.values()))
+        base = min(i for i, c in long_counts.items() if c >= floor)
+        cues_at = Counter(i for i, t in filled if i > base + 4 and _is_cue_text(t))
+        if cues_at:
+            level, c = cues_at.most_common(1)[0]
+            if c >= 5:
+                cue_min = base + 0.6 * (level - base)
+
+    if cue_min is not None:
+        is_cue = lambda k: bool(txt[k]) and ind[k] >= cue_min and _is_cue_text(txt[k])
+        i = 0
+        while i < n:
+            k, i = i, i + 1
+            if not txt[k]:
+                continue
+            head = _heading(txt[k])
+            if head:
+                cur = _segment(segments, head)
+            elif is_cue(k):
+                key, buf = _key(txt[k]), []
+                while i < n:                                    # blank lines (page margins) do not end a speech;
+                    if not txt[i]:                              # a line back at the action margin does
+                        i += 1
+                        continue
+                    if ind[i] <= base + 2 or is_cue(i) or _heading(txt[i]):
+                        break
+                    if not PAREN_LINE.match(txt[i]):
+                        buf.append(txt[i])
+                    i += 1
+                emit(key, _join(buf))
+        return entries, [sg for sg in segments if sg["ids"]]
+
+    # --- plain text: no usable indentation
+    has_blanks = any(not t for t in txt)
+
+    def label(k):
+        m = LABEL_LINE.match(txt[k])
+        return (_key(m.group(1)), m.group(2)) if m and not _heading(txt[k]) else None
+
+    seen = {}
+    for k in range(n):
+        lab = label(k)
+        key = lab[0] if lab else (_key(txt[k]) if _is_cue_text(txt[k]) and k + 1 < n and txt[k + 1] else None)
+        if key:
+            seen[key] = seen.get(key, 0) + 1
+
+    ok_label = lambda key: key in ALIASES or seen.get(key, 0) >= 2
+    ok_cue = lambda key: key in ALIASES or seen.get(key, 0) >= 2 or has_blanks
+    starts_new = lambda k: bool(_heading(txt[k]) or (label(k) and ok_label(label(k)[0]))
+                                or (_is_cue_text(txt[k]) and ok_cue(_key(txt[k]))))
+
     i = 0
     while i < n:
-        l = lines[i]
-        i += 1
-        if not l:
+        k, i = i, i + 1
+        if not txt[k]:
             continue
-        if _is_heading(l):
-            cur = _segment(segments, l)
+        head = _heading(txt[k])
+        if head:
+            cur = _segment(segments, head)
             continue
-        lab = label(l)
+        lab = label(k)
         if lab and ok_label(lab[0]):
-            key, buf = lab
-            while i < n and lines[i] and not starts_new(lines[i]):
-                buf += " " + lines[i]
+            key, buf = lab[0], [lab[1]]
+            while i < n and txt[i] and not starts_new(i):
+                buf.append(txt[i])
                 i += 1
-            emit(key, buf)
-        elif _is_cue(l) and ok_cue(_key(l)) and i < n and lines[i]:
-            key, buf = _key(l), []
-            while i < n and lines[i] and not starts_new(lines[i]):
-                if not PAREN_LINE.match(lines[i]):
-                    buf.append(lines[i])
+            emit(key, _join(buf))
+        elif _is_cue_text(txt[k]) and ok_cue(_key(txt[k])) and i < n and txt[i]:
+            key, buf = _key(txt[k]), []
+            while i < n and txt[i] and not starts_new(i):
+                if not PAREN_LINE.match(txt[i]):
+                    buf.append(txt[i])
                 i += 1
-            emit(key, " ".join(buf))
+            emit(key, _join(buf))
     return entries, [sg for sg in segments if sg["ids"]]
 
 
 # ----------------------------- public API -----------------------------
+def _pdf_has_ids(path, pages=12):
+    """Quick look at the first pages: does anything match an ID format from Customize?
+    Saves reading a long screenplay twice when it has no IDs at all."""
+    if not any(r["regexes"] for r in RULES):
+        return False
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return False
+    reader = PdfReader(str(path))
+    text = _fix_dashes("\n".join((pg.extract_text() or "") for pg in reader.pages[:pages]))
+    return bool(ID_IN_PDF.search(text))
+
+
 def load_script_full(path):
-    """Read the recording script (PDF or Word). Returns (entries, segments)."""
+    """Read the recording script (PDF or Word). Returns (entries, segments).
+    IDs from Customize are used when the script has them; otherwise it is read by character name."""
     path = Path(path)
     if path.suffix.lower() in (".docx", ".docm"):
         entries, segments = _load_script_docx(path)
-    else:
+    elif _pdf_has_ids(path):
         entries, segments = _load_script_pdf(path)
+    else:
+        entries, segments = {}, []
     if entries:                                   # the script has IDs the rules recognise
         GENERATED.clear()
         return entries, segments

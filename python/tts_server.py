@@ -1,14 +1,7 @@
-"""
-TTS Runner server. Talks to the Electron app over stdin/stdout, one JSON object per line:
 
-  request : {"id": 1, "type": "...", "payload": {...}}
-  response: {"id": 1, "ok": true, "result": {...}} | {"id": 1, "ok": false, "error": "..."}
-
-This file holds the app-side work: reading scripts, scanning folders, saving and mixing audio.
-Everything specific to one voice service lives in its own module (elevenlabs_api.py).
-"""
 import base64
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -30,6 +23,7 @@ sys.path.insert(0, str(ROOT))
 
 import audio_engine as engine  # noqa: E402  (script reader: PDF + Word, IDs, names, segments)
 import elevenlabs_api as eleven  # noqa: E402  (ElevenLabs API client)
+import minimax_api as minimax  # noqa: E402  (MiniMax API client)
 
 AUDIO_EXTS = (".mp3", ".wav", ".m4a", ".flac", ".ogg")
 
@@ -58,8 +52,8 @@ def load_script(p):
     names = engine.rule_names()                       # code -> name, for characters listed in Customize
     omit = {str(c).strip().upper() for c in (p.get("ignored") or [])}
     seg_of = {sid: sg["label"] for sg in segments for sid in sg["ids"]}
-    everything = [{"id": sid, "text": text, "segment": seg_of.get(sid, ""), "character": engine.character_of(sid)}
-                  for sid, text in entries.items()]
+    everything = [{"id": sid, "text": text, "segment": seg_of.get(sid, ""), "character": engine.character_of(sid), "n": n}
+                  for n, (sid, text) in enumerate(entries.items())]
 
     # every character found in the script, with how many lines, whether Customize knows it, and whether it is omitted
     roster = {}
@@ -72,10 +66,12 @@ def load_script(p):
         r["count"] += 1
 
     items = [it for it in everything if it["character"] not in omit]
+    hidden = [it for it in everything if it["character"] in omit]     # sent too, so the app can restore them instantly
     empty = [i["id"] for i in items if not i["text"]]
     characters = list(dict.fromkeys(i["character"] for i in items if i["character"]))
     return {"items": items, "segments": [s["label"] for s in segments], "empty": empty,
-            "characters": characters, "groups": engine.group_codes(), "roster": list(roster.values())}
+            "characters": characters, "groups": engine.group_codes(), "roster": list(roster.values()),
+            "omittedItems": hidden}
 
 
 # ---------------------------------------------------------------- saved audio
@@ -126,9 +122,9 @@ def list_takes(p):
 
 
 def mix(p):
-    ff = shutil.which("ffmpeg")
+    ff = os.environ.get("FFMPEG_PATH") or shutil.which("ffmpeg")
     if not ff:
-        raise RuntimeError("ffmpeg not found on PATH. Install it, then restart the app.")
+        raise RuntimeError("ffmpeg not found. Install it, then restart the app.")
     tdir = Path(p["takesDir"])
     out = Path(p["outputDir"])
     out.mkdir(parents=True, exist_ok=True)
@@ -153,7 +149,8 @@ def mix(p):
         cmd += ["-i", str(t)]
     tmp = out / f"{sid}.mixing.mp3"
     cmd += ["-filter_complex", graph, "-map", "[out]", "-c:a", "libmp3lame", "-q:a", "2", str(tmp)]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    r = subprocess.run(cmd, capture_output=True, text=True, creationflags=flags)
     if r.returncode:
         raise RuntimeError("ffmpeg failed: " + r.stderr.strip()[-300:])
     for old in out.glob(sid + ".*"):
@@ -203,6 +200,14 @@ def eleven_generate(p):
             "data": base64.b64encode(audio).decode("ascii")}
 
 
+def minimax_generate(p):
+    """Generate a clip with MiniMax. Held until the app asks to keep it (api_save)."""
+    audio, info = minimax.synthesize(p)
+    _LAST["audio"], _LAST["ext"] = audio, "." + info["ext"].lstrip(".")
+    return {"seconds": info["seconds"], "mime": info["mime"],
+            "data": base64.b64encode(audio).decode("ascii")}
+
+
 def api_save(p):
     """Write the last generated clip to <outputDir>/<id>.<ext>, replacing an older take of the same line."""
     if not _LAST["audio"]:
@@ -230,6 +235,8 @@ HANDLERS = {
     "eleven_generate": eleven_generate,
     "eleven_voices": eleven.voices,
     "api_save": api_save,
+    "minimax_generate": minimax_generate,
+    "minimax_voices": minimax.voices,
 }
 
 

@@ -1,21 +1,16 @@
-/* Emotion + sound tags. Lines keep the app's own storage format ({emotion}…{/emotion} wrapper and
-   (sound) / [tag] markers); lib/engines.js converts them into what each API expects. */
 
-// "neutral" is kept so old saved edits still parse. It means "let the model decide".
 export const ALL_EMOTIONS = ["happy", "angry", "sad", "fearful", "disgusted", "surprised", "neutral", "calm", "fluent", "whisper"];
 
-// MiniMax emotion values per model (speech-2.8 has no fluent/whisper; those are 2.6 only).
 export const minimaxEmotions = (model) => {
   const base = ["happy", "sad", "angry", "fearful", "disgusted", "surprised", "calm"];
   return /^speech-2\.6/.test(model) ? [...base, "fluent", "whisper"] : base;
 };
 
-// MiniMax interjection tags, only supported on speech-2.8-*.
 export const SOUNDS = ["laughs", "chuckle", "coughs", "clear-throat", "groans", "breath", "pant", "inhale", "exhale", "gasps", "sniffs", "sighs", "snorts", "burps", "lip-smacking", "humming", "hissing", "emm", "sneezes"];
 export const SOUND_ALIASES = { laugh: "laughs", cough: "coughs" };   // old spellings in saved edits
 export const minimaxSoundTags = (model) => (/^speech-2\.8/.test(model) ? SOUNDS : []);
 
-// ElevenLabs v3/v4 audio tags. Add more to any list and they appear automatically.
+
 export const ELEVEN_TAGS = {
   "Emotion": ["weak", "angry", "bored", "menacing", "playful", "tired", "excited"],
   "Vocalizations": ["clears throat", "coughing", "chuckling", "sighing", "sniffling", "yawning", "laughing", "sharp exhale", "scoffing", "humming", "panting", "gasping"],

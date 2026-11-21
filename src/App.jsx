@@ -104,6 +104,14 @@ export default function App() {
             />
           )}
         </div>
+
+        <footer className="statusbar">
+          <span className="sbname" title={project.projectFile || ""}>Project <b>{project.projectName || (script.scriptPath ? project.baseName() : "Untitled project")}</b></span>
+          {script.loadingPath && <span className="sbbusy"><i className="spinner" /> Reading script…</span>}
+          {script.scriptPath && !project.projectFile && <span>Not saved to a file yet — press Ctrl+S</span>}
+          <span className="sbspace" />
+          {project.savedAt && <span>{settings.autosaveProject && project.projectFile ? "Autosaved" : "Saved"} {project.savedAt}</span>}
+        </footer>
       </div>
     </div>
   );

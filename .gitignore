@@ -1,12 +1,8 @@
 node_modules/
 dist/
-out/
 release/
+build/
+backend/
+resources/bin/
+*.spec
 __pycache__/
-*.pyc
-.venv/
-venv/
-*.mp3
-*.wav
-*.tts-project.json
-.env

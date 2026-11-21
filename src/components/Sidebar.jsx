@@ -108,9 +108,7 @@ const NAV = [
   ["run", "TTS Runner", "play"],
 ];
 
-/* Keeps the recent list in a fixed order. The app moves a project to the top every time it is
-   opened; here the order stays put. A project we haven't seen before goes to the top once,
-   then stays where it is. The order is remembered between launches. */
+
 const ORDER_KEY = "recentOrder";
 
 function stableOrder(list) {
@@ -126,13 +124,6 @@ function stableOrder(list) {
 
 const samePath = (a, b) => !!a && !!b && a.replace(/\\/g, "/").toLowerCase() === b.replace(/\\/g, "/").toLowerCase();
 
-/**
- * page / setPage   current page id and its setter
- * onNew            File > New project
- * onOpenRecent     called with a { name, path } item from the recent list
- * currentPath      file path of the open project, highlighted in the list
- * (the rest are passed through to SidebarTop)
- */
 export function Sidebar({ page, setPage, onNew, onOpenRecent, currentPath, disabled, ...top }) {
   const [recent, setRecent] = useState([]);
   useEffect(() => window.api.onRecent((list) => setRecent(stableOrder(list))), []);
