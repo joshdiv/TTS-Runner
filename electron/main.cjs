@@ -52,36 +52,6 @@ function request(type, payload) {
   });
 }
 
-// ---------- Chrome launcher (separate profile so your MiniMax login is remembered) ----------
-function findChrome() {
-  const c = [];
-  if (process.platform === "win32") {
-    for (const base of [process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"], process.env.LOCALAPPDATA])
-      if (base) c.push(path.join(base, "Google", "Chrome", "Application", "chrome.exe"));
-    for (const base of [process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"]])
-      if (base) c.push(path.join(base, "Microsoft", "Edge", "Application", "msedge.exe"));
-  } else if (process.platform === "darwin") {
-    c.push("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
-  } else {
-    c.push("/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser");
-  }
-  return c.find((p) => fs.existsSync(p));
-}
-
-ipcMain.handle("launch-chrome", (_e, port, url) => {
-  const exe = findChrome();
-  if (!exe) return { ok: false, error: "Chrome/Edge not found. Start it yourself with --remote-debugging-port=" + port };
-  const profile = path.join(app.getPath("userData"), "chrome-profile");
-  const child = spawn(exe, [
-    `--remote-debugging-port=${port}`,
-    `--user-data-dir=${profile}`,
-    "--no-first-run",
-    url,
-  ], { detached: true, stdio: "ignore" });
-  child.unref();
-  return { ok: true, result: { exe, profile } };
-});
-
 // ---------- ID rules: characters + their ID formats, stored as JSON in the app's data folder ----------
 // Seeded once from electron/default-id-rules.json, then edited from the Customize dialog.
 const rulesFile = () => path.join(app.getPath("userData"), "id-rules.json");
@@ -145,7 +115,7 @@ ipcMain.handle("pick-project-save", async (_e, name) => {
   return /\.ttsrunner$/i.test(r.filePath) ? r.filePath : r.filePath + ".ttsrunner";
 });
 
-// NEW: replaces File > Open project… (was in menu.cjs). Returns the same shape the menu used to send.
+// Replaces File > Open project… Returns the same shape the menu used to send.
 ipcMain.handle("pick-project-open", async () => {
   const r = await dialog.showOpenDialog(win, {
     title: "Open project",
@@ -163,10 +133,6 @@ ipcMain.handle("pick-project-open", async () => {
     return { ok: false, error: e.message };
   }
 });
-
-// The recent list now lives in the app UI, so there is no native menu to rebuild.
-// Kept as a no-op so existing `api.setRecent(...)` calls don't break.
-ipcMain.on("recent", () => {});
 
 // ---------- Window controls (the renderer draws the buttons) ----------
 ipcMain.on("win:minimize", () => win?.minimize());

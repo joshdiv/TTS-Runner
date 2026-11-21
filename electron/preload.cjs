@@ -22,7 +22,7 @@ contextBridge.exposeInMainWorld("api", {
   pickScript: () => ipcRenderer.invoke("pick-script"),
   pickDir: () => ipcRenderer.invoke("pick-dir"),
   pickProjectSave: (name) => ipcRenderer.invoke("pick-project-save", name),
-  pickProjectOpen: () => ipcRenderer.invoke("pick-project-open"),   // NEW
+  pickProjectOpen: () => ipcRenderer.invoke("pick-project-open"),
   setRecent: (list) => {
     recent = Array.isArray(list) ? list : [];
     recentListeners.forEach((cb) => cb(recent));
@@ -32,7 +32,6 @@ contextBridge.exposeInMainWorld("api", {
     cb(recent);
     return () => recentListeners.delete(cb);
   },
-  launchChrome: (port, url) => ipcRenderer.invoke("launch-chrome", port, url),
   onLog: (cb) => listen("engine-log", cb),
 
   // menu actions: { action: "new" | "open" | "save" | "save-as" | "settings" | ... }
@@ -49,7 +48,7 @@ contextBridge.exposeInMainWorld("api", {
     path: () => ipcRenderer.invoke("rules:path"),
   },
 
-  // window controls (NEW)
+  // window controls
   win: {
     minimize: () => ipcRenderer.send("win:minimize"),
     toggleMaximize: () => ipcRenderer.send("win:toggle-maximize"),
