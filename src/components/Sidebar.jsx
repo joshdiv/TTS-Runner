@@ -101,6 +101,22 @@ export function SidebarTop({ onToggle, onOpen, onSaveAs, onSettings, disabled })
   );
 }
 
+/* ---------- Change notifier ---------- */
+/* Call this in the component that owns the project data:
+     useProjectChangeNotifier(projectData, currentPath);
+   When the project is edited (debounced), it moves to the top of the recent list. */
+
+export function useProjectChangeNotifier(projectData, currentPath, delay = 500) {
+  const first = useRef(true);
+
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }   // loading isn't an edit
+    if (!currentPath) return;                               // unsaved project: nothing to bump yet
+    const t = setTimeout(() => window.api.projectChanged(currentPath), delay);
+    return () => clearTimeout(t);
+  }, [projectData, currentPath, delay]);
+}
+
 /* ---------- Sidebar ---------- */
 
 const NAV = [
@@ -108,25 +124,23 @@ const NAV = [
   ["run", "TTS Runner", "play"],
 ];
 
-
-const ORDER_KEY = "recentOrder";
-
-function stableOrder(list) {
-  let saved = [];
-  try { saved = JSON.parse(localStorage.getItem(ORDER_KEY) || "[]"); } catch { /* ignore */ }
-  const have = new Set(list.map((r) => r.path));
-  const known = new Set(saved);
-  const order = [...list.filter((r) => !known.has(r.path)).map((r) => r.path), ...saved.filter((x) => have.has(x))];
-  try { localStorage.setItem(ORDER_KEY, JSON.stringify(order)); } catch { /* ignore */ }
-  const byPath = new Map(list.map((r) => [r.path, r]));
-  return order.map((x) => byPath.get(x));
-}
-
 const samePath = (a, b) => !!a && !!b && a.replace(/\\/g, "/").toLowerCase() === b.replace(/\\/g, "/").toLowerCase();
+
+const OPEN_KEY = "recentOpen";
 
 export function Sidebar({ page, setPage, onNew, onOpenRecent, currentPath, disabled, ...top }) {
   const [recent, setRecent] = useState([]);
-  useEffect(() => window.api.onRecent((list) => setRecent(stableOrder(list))), []);
+  const [showRecent, setShowRecent] = useState(() => {
+    try { return localStorage.getItem(OPEN_KEY) !== "0"; } catch { return true; }
+  });
+
+  useEffect(() => window.api.onRecent((list) => setRecent(list)), []);
+
+  const toggleRecent = () => setShowRecent((v) => {
+    const next = !v;
+    try { localStorage.setItem(OPEN_KEY, next ? "1" : "0"); } catch { /* ignore */ }
+    return next;
+  });
 
   return (
     <aside className="sidebar">
@@ -148,22 +162,34 @@ export function Sidebar({ page, setPage, onNew, onOpenRecent, currentPath, disab
         ))}
       </nav>
 
-      <div className="recent-head">Recent projects</div>
-      <div className="recent">
-        {recent.length === 0 && <div className="recent-empty">No recent projects</div>}
-        {recent.map((r) => (
-          <button
-            key={r.path}
-            className={`recentitem${samePath(r.path, currentPath) ? " active" : ""}`}
-            aria-current={samePath(r.path, currentPath) ? "true" : undefined}
-            title={r.path}
-            disabled={disabled}
-            onClick={() => onOpenRecent(r)}
-          >
-            {r.name}
-          </button>
-        ))}
-      </div>
+      <button
+        className="recent-head recent-toggle"
+        aria-expanded={showRecent}
+        onClick={toggleRecent}
+        title={showRecent ? "Hide recent projects" : "Show recent projects"}
+      >
+        <span className={`chev${showRecent ? " open" : ""}`} aria-hidden="true">▸</span>
+        Recent projects
+        {recent.length > 0 && <span className="recent-count">{recent.length}</span>}
+      </button>
+
+      {showRecent && (
+        <div className="recent">
+          {recent.length === 0 && <div className="recent-empty">No recent projects</div>}
+          {recent.map((r) => (
+            <button
+              key={r.path}
+              className={`recentitem${samePath(r.path, currentPath) ? " active" : ""}`}
+              aria-current={samePath(r.path, currentPath) ? "true" : undefined}
+              title={r.path}
+              disabled={disabled}
+              onClick={() => { window.api.projectChanged(r.path); onOpenRecent(r); }}
+            >
+              {r.name}
+            </button>
+          ))}
+        </div>
+      )}
     </aside>
   );
 }
