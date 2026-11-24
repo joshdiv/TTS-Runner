@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld("api", {
     recent = Array.isArray(list) ? list : [];
     recentListeners.forEach((cb) => cb(recent));
   },
+  projectChanged: () => ipcRenderer.send("project:changed"),
   onRecent: (cb) => {            // cb([{ name, path }, ...]) is called now and on every change
     recentListeners.add(cb);
     cb(recent);
